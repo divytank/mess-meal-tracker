@@ -3,7 +3,7 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup,
-  onAuthStateChanged
+  onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
   getFirestore,
@@ -11,14 +11,14 @@ import {
   getDoc,
   setDoc,
   collection,
-  where,
   query,
+  where,
   getDocs,
   runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// Firebase configuration
+// Firebase Config
 const firebaseConfig = {
   apiKey: "AIzaSyA2kUqIt4TymFZuwqmYHAn84Q4YYLK2wL8",
   authDomain: "messmealtracker.firebaseapp.com",
@@ -40,36 +40,27 @@ const authContainer = document.getElementById("auth-container");
 const appContainer = document.getElementById("app-container");
 const adminSection = document.getElementById("admin-section");
 const googleLoginBtn = document.getElementById("googleLogin");
-const mealSelectionDiv = document.getElementById("meal-selection");
 const datePicker = document.getElementById("student-date-picker");
-const studentDataContainer = document.getElementById("students-daily-data");
 
 // Global Variables
 let currentUser = null;
 let isAdmin = false;
 
-// Initialize application
+// Initialize App
+initApp();
+
 function initApp() {
-  setupEventListeners();
-  checkAuthState();
-  // Set default date to today
-  datePicker.value = new Date().toISOString().split('T')[0];
-}
-
-// Event Listeners
-function setupEventListeners() {
-  googleLoginBtn.addEventListener("click", handleGoogleLogin);
-  datePicker.addEventListener("change", loadStudentDailyData);
-}
-
-// Authentication State Observer
-function checkAuthState() {
+  // Set up auth state listener
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
       authContainer.style.display = "none";
       appContainer.style.display = "block";
-      await checkAdminStatus(user.uid);
+      
+      // Check/create user document
+      await handleUserDocument(user);
+      
+      // Initialize meal selection
       initMealSelection();
     } else {
       currentUser = null;
@@ -77,39 +68,49 @@ function checkAuthState() {
       appContainer.style.display = "none";
     }
   });
+
+  // Set up login button
+  googleLoginBtn.addEventListener("click", handleGoogleLogin);
+  
+  // Set up date picker for admin
+  datePicker.addEventListener("change", loadStudentDailyData);
+  
+  // Set default date to today
+  datePicker.value = new Date().toISOString().split('T')[0];
 }
 
-// Google Sign-In
+// Google Login Handler
 async function handleGoogleLogin() {
   try {
     const result = await signInWithPopup(auth, provider);
-    // Check if new user and create document
-    const userDoc = await getDoc(doc(db, "users", result.user.uid));
-    if (!userDoc.exists()) {
-      await setDoc(doc(db, "users", result.user.uid), {
-        name: result.user.displayName,
-        email: result.user.email,
-        isAdmin: false,
-        createdAt: serverTimestamp()
-      });
-    }
+    console.log("User logged in:", result.user);
   } catch (error) {
     console.error("Login error:", error);
-    alert("Login failed. Please try again.");
+    alert(`Login failed: ${error.message}`);
   }
 }
 
-// Check Admin Status
-async function checkAdminStatus(userId) {
-  const userDoc = await getDoc(doc(db, "users", userId));
-  isAdmin = userDoc.exists() && userDoc.data().isAdmin;
+// Create user document if doesn't exist
+async function handleUserDocument(user) {
+  const userRef = doc(db, "users", user.uid);
+  const docSnap = await getDoc(userRef);
+  
+  if (!docSnap.exists()) {
+    await setDoc(userRef, {
+      name: user.displayName,
+      email: user.email,
+      isAdmin: false, // Set to true manually for admin users
+      createdAt: serverTimestamp()
+    });
+  }
+  
+  // Check admin status
+  isAdmin = docSnap.data()?.isAdmin || false;
+  adminSection.style.display = isAdmin ? "block" : "none";
   
   if (isAdmin) {
-    adminSection.style.display = "block";
     loadAdminDashboard();
     loadStudentDailyData();
-  } else {
-    adminSection.style.display = "none";
   }
 }
 
@@ -120,18 +121,18 @@ function initMealSelection() {
   
   meals.forEach(meal => {
     html += `
-      <div class="meal-option">
-        <input type="checkbox" id="${meal.toLowerCase()}-check" class="meal-checkbox">
-        <label for="${meal.toLowerCase()}-check">${meal}</label>
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input meal-checkbox" type="checkbox" id="${meal.toLowerCase()}-check">
+        <label class="form-check-label" for="${meal.toLowerCase()}-check">${meal}</label>
       </div>
     `;
   });
   
-  mealSelectionDiv.innerHTML = html;
+  document.getElementById("meal-selection").innerHTML = html;
   
   // Add event listeners
   document.querySelectorAll(".meal-checkbox").forEach(checkbox => {
-    checkbox.addEventListener("change", handleMealSelection);
+    checkbox.addEventListener("change", handleMealSelectionChange);
   });
   
   loadCurrentSelections();
@@ -157,7 +158,7 @@ async function loadCurrentSelections() {
 }
 
 // Handle meal selection changes
-async function handleMealSelection(e) {
+async function handleMealSelectionChange(e) {
   const mealType = e.target.id.split('-')[0];
   const isSelected = e.target.checked;
   
@@ -260,7 +261,8 @@ function renderWeeklyChart(labels, data) {
 // Student Daily Data
 async function loadStudentDailyData() {
   const selectedDate = datePicker.value;
-  studentDataContainer.innerHTML = "<div class='loading'>Loading data...</div>";
+  const container = document.getElementById("students-daily-data");
+  container.innerHTML = "<div class='loading'>Loading data...</div>";
   
   try {
     const [usersSnapshot, mealDoc] = await Promise.all([
@@ -272,9 +274,80 @@ async function loadStudentDailyData() {
     const mealData = mealDoc.exists() ? mealDoc.data() : null;
     
     if (!mealData) {
-      studentDataContainer.innerHTML = "<div class='no-data'>No data available for this date</div>";
+      container.innerHTML = "<div class='no-data'>No data available for this date</div>";
       return;
     }
     
-    renderStudentDataTable(users, mealData);
-  } catch (error)
+    renderStudentData(users, mealData, container);
+  } catch (error) {
+    console.error("Error loading data:", error);
+    container.innerHTML = `<div class='error'>Error: ${error.message}</div>`;
+  }
+}
+
+function renderStudentData(users, mealData, container) {
+  let html = `
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Student Name</th>
+          <th>Breakfast</th>
+          <th>Lunch</th>
+          <th>Dinner</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  
+  users.forEach(user => {
+    html += `
+      <tr>
+        <td>${user.name || user.email}</td>
+        <td>${mealData.breakfast?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}</td>
+        <td>${mealData.lunch?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}</td>
+        <td>${mealData.dinner?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}</td>
+      </tr>
+    `;
+  });
+  
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
+
+// Helper Functions
+function getWeekDates(date) {
+  const day = date.getDay();
+  const startDate = new Date(date);
+  startDate.setDate(date.getDate() - day);
+  
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    return d.toISOString().split('T')[0];
+  });
+}
+
+function canChangeSelection() {
+  const now = new Date();
+  const cutoff = new Date();
+  cutoff.setHours(21, 0, 0, 0); // 9 PM cutoff
+  return now < cutoff;
+}
+
+function checkChangeWindow() {
+  const canChange = canChangeSelection();
+  document.getElementById("cutoff-time").textContent = canChange ?
+    "Changes allowed until 9 PM" : "Changes locked for today";
+  
+  document.querySelectorAll(".meal-checkbox").forEach(cb => {
+    cb.disabled = !canChange;
+  });
+}
+
+function showAlert(message, type) {
+  const alertDiv = document.createElement("div");
+  alertDiv.className = `alert alert-${type}`;
+  alertDiv.textContent = message;
+  document.body.appendChild(alertDiv);
+  setTimeout(() => alertDiv.remove(), 3000);
+}
