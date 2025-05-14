@@ -1,4 +1,24 @@
-// Firebase Configuration
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  where,
+  query,
+  getDocs,
+  runTransaction,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyA2kUqIt4TymFZuwqmYHAn84Q4YYLK2wL8",
   authDomain: "messmealtracker.firebaseapp.com",
@@ -10,10 +30,10 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
-const provider = new firebase.auth.GoogleAuthProvider();
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const provider = new GoogleAuthProvider();
 
 // DOM Elements
 const authContainer = document.getElementById("auth-container");
@@ -22,31 +42,34 @@ const adminSection = document.getElementById("admin-section");
 const googleLoginBtn = document.getElementById("googleLogin");
 const mealSelectionDiv = document.getElementById("meal-selection");
 const datePicker = document.getElementById("student-date-picker");
+const studentDataContainer = document.getElementById("students-daily-data");
 
 // Global Variables
 let currentUser = null;
 let isAdmin = false;
 
-// Initialize the application
-function init() {
+// Initialize application
+function initApp() {
   setupEventListeners();
   checkAuthState();
+  // Set default date to today
+  datePicker.value = new Date().toISOString().split('T')[0];
 }
 
-// Set up event listeners
+// Event Listeners
 function setupEventListeners() {
   googleLoginBtn.addEventListener("click", handleGoogleLogin);
   datePicker.addEventListener("change", loadStudentDailyData);
 }
 
-// Check authentication state
+// Authentication State Observer
 function checkAuthState() {
-  auth.onAuthStateChanged(user => {
+  onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
       authContainer.style.display = "none";
       appContainer.style.display = "block";
-      checkAdminStatus(user.uid);
+      await checkAdminStatus(user.uid);
       initMealSelection();
     } else {
       currentUser = null;
@@ -56,150 +79,144 @@ function checkAuthState() {
   });
 }
 
-// Handle Google login
+// Google Sign-In
 async function handleGoogleLogin() {
   try {
-    await auth.signInWithPopup(provider);
+    const result = await signInWithPopup(auth, provider);
+    // Check if new user and create document
+    const userDoc = await getDoc(doc(db, "users", result.user.uid));
+    if (!userDoc.exists()) {
+      await setDoc(doc(db, "users", result.user.uid), {
+        name: result.user.displayName,
+        email: result.user.email,
+        isAdmin: false,
+        createdAt: serverTimestamp()
+      });
+    }
   } catch (error) {
     console.error("Login error:", error);
     alert("Login failed. Please try again.");
   }
 }
 
-// Check if user is admin
+// Check Admin Status
 async function checkAdminStatus(userId) {
-  const userDoc = await db.collection("users").doc(userId).get();
-  isAdmin = userDoc.exists && userDoc.data().isAdmin;
+  const userDoc = await getDoc(doc(db, "users", userId));
+  isAdmin = userDoc.exists() && userDoc.data().isAdmin;
   
   if (isAdmin) {
     adminSection.style.display = "block";
     loadAdminDashboard();
-    // Set default date to today
-    const today = new Date().toISOString().split("T")[0];
-    datePicker.value = today;
     loadStudentDailyData();
+  } else {
+    adminSection.style.display = "none";
   }
 }
 
-// Initialize meal selection UI
+// Meal Selection System
 function initMealSelection() {
   const meals = ["Breakfast", "Lunch", "Dinner"];
   let html = "";
   
   meals.forEach(meal => {
     html += `
-      <div class="form-check form-switch mb-3">
-        <input class="form-check-input meal-checkbox" type="checkbox" id="${meal.toLowerCase()}-check">
-        <label class="form-check-label" for="${meal.toLowerCase()}-check">${meal}</label>
+      <div class="meal-option">
+        <input type="checkbox" id="${meal.toLowerCase()}-check" class="meal-checkbox">
+        <label for="${meal.toLowerCase()}-check">${meal}</label>
       </div>
     `;
   });
   
   mealSelectionDiv.innerHTML = html;
   
-  // Add event listeners to checkboxes
+  // Add event listeners
   document.querySelectorAll(".meal-checkbox").forEach(checkbox => {
-    checkbox.addEventListener("change", handleMealSelectionChange);
+    checkbox.addEventListener("change", handleMealSelection);
   });
   
   loadCurrentSelections();
 }
 
-// Load current meal selections
+// Load current selections
 async function loadCurrentSelections() {
-  const today = new Date().toISOString().split("T")[0];
-  const docRef = db.collection("daily_meals").doc(today);
-  const doc = await docRef.get();
+  const today = new Date().toISOString().split('T')[0];
+  const docRef = doc(db, "daily_meals", today);
+  const docSnap = await getDoc(docRef);
   
-  if (doc.exists) {
-    const data = doc.data();
-    const userId = currentUser.uid;
-    
+  if (docSnap.exists()) {
+    const data = docSnap.data();
     document.getElementById("breakfast-check").checked = 
-      data.breakfast?.students?.some(s => s.userId === userId) || false;
+      data.breakfast?.students?.some(s => s.userId === currentUser.uid) || false;
     document.getElementById("lunch-check").checked = 
-      data.lunch?.students?.some(s => s.userId === userId) || false;
+      data.lunch?.students?.some(s => s.userId === currentUser.uid) || false;
     document.getElementById("dinner-check").checked = 
-      data.dinner?.students?.some(s => s.userId === userId) || false;
+      data.dinner?.students?.some(s => s.userId === currentUser.uid) || false;
   }
   
   checkChangeWindow();
 }
 
 // Handle meal selection changes
-async function handleMealSelectionChange(event) {
-  const mealType = event.target.id.split("-")[0];
-  const isSelected = event.target.checked;
+async function handleMealSelection(e) {
+  const mealType = e.target.id.split('-')[0];
+  const isSelected = e.target.checked;
   
   if (!canChangeSelection()) {
-    event.target.checked = !isSelected;
-    alert("Changes are only allowed before 9 PM for the next day.");
+    e.target.checked = !isSelected;
+    showAlert("Changes not allowed after 9 PM", "error");
     return;
   }
   
-  await updateMealSelection(mealType, isSelected);
-}
-
-// Check if changes are allowed (before 9 PM)
-function canChangeSelection() {
-  const now = new Date();
-  const cutoff = new Date();
-  cutoff.setHours(21, 0, 0, 0); // 9 PM cutoff
-  return now < cutoff;
+  try {
+    await updateMealSelection(mealType, isSelected);
+    showAlert("Selection updated!", "success");
+  } catch (error) {
+    console.error("Update failed:", error);
+    showAlert("Failed to update selection", "error");
+  }
 }
 
 // Update meal selection in Firestore
 async function updateMealSelection(mealType, isSelected) {
-  const today = new Date().toISOString().split("T")[0];
-  const docRef = db.collection("daily_meals").doc(today);
-  const userId = currentUser.uid;
-  const userName = currentUser.displayName;
+  const today = new Date().toISOString().split('T')[0];
+  const docRef = doc(db, "daily_meals", today);
   
-  try {
-    await db.runTransaction(async transaction => {
-      const doc = await transaction.get(docRef);
-      const data = doc.exists ? doc.data() : { date: today };
-      
-      if (!data[mealType]) {
-        data[mealType] = { count: 0, students: [] };
-      }
-      
-      const mealData = data[mealType];
-      const userIndex = mealData.students.findIndex(s => s.userId === userId);
-      
-      if (isSelected && userIndex === -1) {
-        mealData.students.push({
-          userId,
-          name: userName,
-          timestamp: new Date()
-        });
-        mealData.count++;
-      } else if (!isSelected && userIndex !== -1) {
-        mealData.students.splice(userIndex, 1);
-        mealData.count--;
-      }
-      
-      transaction.set(docRef, data);
-    });
-  } catch (error) {
-    console.error("Transaction failed:", error);
-    alert("Failed to update meal selection. Please try again.");
-  }
+  await runTransaction(db, async (transaction) => {
+    const docSnap = await transaction.get(docRef);
+    const data = docSnap.exists() ? docSnap.data() : { date: today };
+    
+    if (!data[mealType]) data[mealType] = { count: 0, students: [] };
+    
+    const userIndex = data[mealType].students.findIndex(s => s.userId === currentUser.uid);
+    
+    if (isSelected && userIndex === -1) {
+      data[mealType].students.push({
+        userId: currentUser.uid,
+        name: currentUser.displayName,
+        timestamp: serverTimestamp()
+      });
+      data[mealType].count++;
+    } else if (!isSelected && userIndex !== -1) {
+      data[mealType].students.splice(userIndex, 1);
+      data[mealType].count--;
+    }
+    
+    transaction.set(docRef, data);
+  });
 }
 
-// Load admin dashboard
+// Admin Dashboard Functions
 async function loadAdminDashboard() {
   await loadDailySummary();
   await loadWeeklyTrend();
 }
 
-// Load today's summary
 async function loadDailySummary() {
-  const today = new Date().toISOString().split("T")[0];
-  const doc = await db.collection("daily_meals").doc(today).get();
+  const today = new Date().toISOString().split('T')[0];
+  const docSnap = await getDoc(doc(db, "daily_meals", today));
   
-  if (doc.exists) {
-    const data = doc.data();
+  if (docSnap.exists()) {
+    const data = docSnap.data();
     document.querySelector("#today-summary tbody").innerHTML = `
       <tr><td>Breakfast</td><td>${data.breakfast?.count || 0}</td></tr>
       <tr><td>Lunch</td><td>${data.lunch?.count || 0}</td></tr>
@@ -208,121 +225,56 @@ async function loadDailySummary() {
   }
 }
 
-// Load weekly trend data
 async function loadWeeklyTrend() {
   const weekDates = getWeekDates(new Date());
-  const snapshot = await db.collection("daily_meals")
-    .where("date", "in", weekDates)
-    .get();
-    
+  const q = query(
+    collection(db, "daily_meals"),
+    where("date", "in", weekDates)
+  );
+  const querySnapshot = await getDocs(q);
   const weeklyData = {};
-  snapshot.forEach(doc => {
+  
+  querySnapshot.forEach(doc => {
     weeklyData[doc.id] = doc.data();
   });
   
-  // Prepare chart data
-  const chartData = {
-    labels: weekDates,
-    datasets: [
-      { label: "Breakfast", data: weekDates.map(d => weeklyData[d]?.breakfast?.count || 0) },
-      { label: "Lunch", data: weekDates.map(d => weeklyData[d]?.lunch?.count || 0) },
-      { label: "Dinner", data: weekDates.map(d => weeklyData[d]?.dinner?.count || 0) }
-    ]
-  };
-  
-  // Render chart
-  const ctx = document.getElementById("weeklyChart").getContext("2d");
+  renderWeeklyChart(weekDates, weeklyData);
+}
+
+function renderWeeklyChart(labels, data) {
+  const ctx = document.getElementById("weeklyChart").getContext('2d');
   new Chart(ctx, {
-    type: "bar",
-    data: chartData,
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Breakfast', data: labels.map(d => data[d]?.breakfast?.count || 0) },
+        { label: 'Lunch', data: labels.map(d => data[d]?.lunch?.count || 0) },
+        { label: 'Dinner', data: labels.map(d => data[d]?.dinner?.count || 0) }
+      ]
+    },
     options: { responsive: true }
   });
 }
 
-// Load student-wise daily data
+// Student Daily Data
 async function loadStudentDailyData() {
   const selectedDate = datePicker.value;
-  const container = document.getElementById("students-daily-data");
-  container.innerHTML = "<p>Loading data...</p>";
+  studentDataContainer.innerHTML = "<div class='loading'>Loading data...</div>";
   
   try {
-    // Get all users
-    const usersSnapshot = await db.collection("users").get();
-    const users = usersSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const [usersSnapshot, mealDoc] = await Promise.all([
+      getDocs(collection(db, "users")),
+      getDoc(doc(db, "daily_meals", selectedDate))
+    ]);
     
-    // Get meal data for selected date
-    const mealDoc = await db.collection("daily_meals").doc(selectedDate).get();
-    const mealData = mealDoc.exists ? mealDoc.data() : null;
+    const users = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const mealData = mealDoc.exists() ? mealDoc.data() : null;
     
     if (!mealData) {
-      container.innerHTML = "<p>No data available for this date.</p>";
+      studentDataContainer.innerHTML = "<div class='no-data'>No data available for this date</div>";
       return;
     }
     
-    // Generate HTML table
-    let html = `
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Student Name</th>
-            <th>Breakfast</th>
-            <th>Lunch</th>
-            <th>Dinner</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-    
-    users.forEach(user => {
-      const breakfastAttended = mealData.breakfast?.students?.some(s => s.userId === user.id) || false;
-      const lunchAttended = mealData.lunch?.students?.some(s => s.userId === user.id) || false;
-      const dinnerAttended = mealData.dinner?.students?.some(s => s.userId === user.id) || false;
-      
-      html += `
-        <tr>
-          <td>${user.name || "Unknown"}</td>
-          <td>${breakfastAttended ? "✓" : "✗"}</td>
-          <td>${lunchAttended ? "✓" : "✗"}</td>
-          <td>${dinnerAttended ? "✓" : "✗"}</td>
-        </tr>
-      `;
-    });
-    
-    html += "</tbody></table>";
-    container.innerHTML = html;
-    
-  } catch (error) {
-    console.error("Error loading student data:", error);
-    container.innerHTML = "<p class='text-danger'>Failed to load data. Please try again.</p>";
-  }
-}
-
-// Helper function to get week dates
-function getWeekDates(date) {
-  const day = date.getDay();
-  const startDate = new Date(date);
-  startDate.setDate(date.getDate() - day);
-  
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + i);
-    return d.toISOString().split("T")[0];
-  });
-}
-
-// Check change window and update UI
-function checkChangeWindow() {
-  const canChange = canChangeSelection();
-  document.getElementById("cutoff-time").textContent = canChange ? 
-    "Changes allowed until 9 PM" : "Changes locked until tomorrow";
-  
-  document.querySelectorAll(".meal-checkbox").forEach(checkbox => {
-    checkbox.disabled = !canChange;
-  });
-}
-
-// Initialize the application
-init();
+    renderStudentDataTable(users, mealData);
+  } catch (error)
