@@ -3,10 +3,12 @@ body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f8f9fa;
   color: #212529;
+  min-height: 100vh;
 }
 
 .container {
   max-width: 1200px;
+  padding: 2rem 1rem;
 }
 
 /* Auth Container */
@@ -18,22 +20,74 @@ body {
 /* Cards */
 .card {
   border: none;
+  border-radius: 0.5rem;
   box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
   margin-bottom: 1.5rem;
+  overflow: hidden;
 }
 
 .card-header {
+  background-color: #4285F4;
+  color: white;
+  padding: 1rem 1.5rem;
   font-weight: 600;
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+/* Forms and Inputs */
+.form-check-input {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-right: 0.5rem;
+}
+
+.form-control {
+  padding: 0.75rem;
+  border-radius: 0.25rem;
 }
 
 /* Tables */
 .table {
-  margin-bottom: 0;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.table th, .table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #dee2e6;
 }
 
 .table th {
-  border-top: none;
+  background-color: #f8f9fa;
   font-weight: 600;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background-color: #4285F4;
+  border-color: #4285F4;
+}
+
+.btn-primary:hover {
+  background-color: #3367d6;
+  border-color: #3367d6;
+}
+
+.btn-danger {
+  background-color: #dc3545;
+  border-color: #dc3545;
 }
 
 /* Alerts */
@@ -44,6 +98,7 @@ body {
   padding: 0.75rem 1.25rem;
   border-radius: 0.25rem;
   animation: fadeIn 0.3s;
+  z-index: 1000;
 }
 
 .alert-success {
@@ -62,13 +117,18 @@ body {
 }
 
 /* Loading States */
-.loading, .no-data, .error {
+.loading, .no-data {
   padding: 2rem;
   text-align: center;
+  color: #6c757d;
 }
 
 /* Responsive */
 @media (max-width: 768px) {
+  .container {
+    padding: 1rem;
+  }
+  
   .card-body {
     padding: 1rem;
   }
