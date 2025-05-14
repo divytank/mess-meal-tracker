@@ -15,13 +15,16 @@
       <button id="googleLogin" class="btn btn-primary btn-lg">
         Login with Google
       </button>
-      <button id="logoutBtn" class="btn btn-danger mt-3" style="display: none;">
-        Logout
-      </button>
     </div>
 
     <!-- App Section -->
     <div id="app-container" style="display: none;">
+      <!-- Header with Logout -->
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Welcome, <span id="user-name"></span></h2>
+        <button id="logoutBtn" class="btn btn-danger">Logout</button>
+      </div>
+
       <!-- Meal Selection Card -->
       <div class="card shadow mb-4">
         <div class="card-header bg-primary text-white">
@@ -29,9 +32,8 @@
           <small id="cutoff-time" class="text-warning"></small>
         </div>
         <div class="card-body">
-          <div id="meal-selection">
-            <!-- Dynamically loaded -->
-          </div>
+          <div id="meal-selection"></div>
+          <div id="update-status" class="mt-3"></div>
         </div>
       </div>
 
@@ -76,7 +78,6 @@
     </div>
   </div>
 
-  <!-- Firebase & Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script type="module" src="app.js"></script>
 </body>
