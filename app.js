@@ -39,8 +39,10 @@ const provider = new GoogleAuthProvider();
 // DOM Elements
 const authContainer = document.getElementById("auth-container");
 const appContainer = document.getElementById("app-container");
+const adminSection = document.getElementById("admin-section");
 const googleLoginBtn = document.getElementById("googleLogin");
-const logoutBtn = document.getElementById("logoutBtn"); // Add this button to your HTML
+const logoutBtn = document.getElementById("logoutBtn");
+const datePicker = document.getElementById("student-date-picker");
 
 // Global Variables
 let currentUser = null;
@@ -50,19 +52,13 @@ let isAdmin = false;
 initApp();
 
 function initApp() {
-  // Clear any existing listeners
-  googleLoginBtn.replaceWith(googleLoginBtn.cloneNode(true));
-  if (logoutBtn) logoutBtn.replaceWith(logoutBtn.cloneNode(true));
-
   // Set up auth state listener
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
       authContainer.style.display = "none";
       appContainer.style.display = "block";
-      
-      // Debug log
-      console.log("User authenticated:", user.uid);
+      logoutBtn.style.display = "block";
       
       // Check/create user document
       await handleUserDocument(user);
@@ -73,20 +69,24 @@ function initApp() {
       currentUser = null;
       authContainer.style.display = "block";
       appContainer.style.display = "none";
-      console.log("User signed out");
+      logoutBtn.style.display = "none";
     }
   });
 
   // Set up login button
-  document.getElementById("googleLogin").addEventListener("click", handleGoogleLogin);
+  googleLoginBtn.addEventListener("click", handleGoogleLogin);
   
-  // Set up logout button if exists
-  if (logoutBtn) {
-    document.getElementById("logoutBtn").addEventListener("click", handleLogout);
-  }
+  // Set up logout button
+  logoutBtn.addEventListener("click", handleLogout);
+  
+  // Set up date picker for admin
+  datePicker.addEventListener("change", loadStudentDailyData);
+  
+  // Set default date to today
+  datePicker.value = new Date().toISOString().split('T')[0];
 }
 
-// Google Login Handler (Fixed)
+// Google Login Handler
 async function handleGoogleLogin() {
   try {
     provider.setCustomParameters({ prompt: 'select_account' });
@@ -122,7 +122,6 @@ async function handleUserDocument(user) {
       createdAt: serverTimestamp(),
       lastLogin: serverTimestamp()
     });
-    console.log("New user document created");
   } else {
     await setDoc(userRef, {
       lastLogin: serverTimestamp()
@@ -131,10 +130,15 @@ async function handleUserDocument(user) {
   
   // Check admin status
   isAdmin = (await getDoc(userRef)).data()?.isAdmin || false;
-  console.log("Admin status:", isAdmin);
+  adminSection.style.display = isAdmin ? "block" : "none";
+  
+  if (isAdmin) {
+    loadAdminDashboard();
+    loadStudentDailyData();
+  }
 }
 
-// Meal Selection System (Fixed Persistence)
+// Meal Selection System
 async function initMealSelection() {
   const today = new Date().toISOString().split('T')[0];
   const docRef = doc(db, "daily_meals", today);
@@ -168,14 +172,13 @@ async function initMealSelection() {
     });
     
     checkChangeWindow();
-    console.log("Meal selection initialized");
   } catch (error) {
     console.error("Error initializing meal selection:", error);
     showAlert("Failed to load meal options", "error");
   }
 }
 
-// Handle meal selection changes (Fixed)
+// Handle meal selection changes
 async function handleMealSelectionChange(e) {
   const mealType = e.target.id.split('-')[0];
   const isSelected = e.target.checked;
@@ -191,12 +194,12 @@ async function handleMealSelectionChange(e) {
     showAlert("Selection updated!", "success");
   } catch (error) {
     console.error("Update failed:", error);
-    e.target.checked = !isSelected; // Revert UI on failure
+    e.target.checked = !isSelected;
     showAlert("Failed to update selection", "error");
   }
 }
 
-// Update meal selection in Firestore (Fixed)
+// Update meal selection in Firestore
 async function updateMealSelection(mealType, isSelected) {
   const today = new Date().toISOString().split('T')[0];
   const docRef = doc(db, "daily_meals", today);
@@ -222,11 +225,136 @@ async function updateMealSelection(mealType, isSelected) {
     }
     
     transaction.set(docRef, data);
-    console.log("Meal selection updated:", mealType, isSelected);
   });
 }
 
+// Admin Dashboard Functions
+async function loadAdminDashboard() {
+  await loadDailySummary();
+  await loadWeeklyTrend();
+}
+
+async function loadDailySummary() {
+  const today = new Date().toISOString().split('T')[0];
+  const docSnap = await getDoc(doc(db, "daily_meals", today));
+  
+  if (docSnap.exists()) {
+    const data = docSnap.data();
+    document.querySelector("#today-summary tbody").innerHTML = `
+      <tr><td>Breakfast</td><td>${data.breakfast?.count || 0}</td></tr>
+      <tr><td>Lunch</td><td>${data.lunch?.count || 0}</td></tr>
+      <tr><td>Dinner</td><td>${data.dinner?.count || 0}</td></tr>
+    `;
+  }
+}
+
+async function loadWeeklyTrend() {
+  const weekDates = getWeekDates(new Date());
+  const q = query(
+    collection(db, "daily_meals"),
+    where("date", "in", weekDates)
+  );
+  const querySnapshot = await getDocs(q);
+  const weeklyData = {};
+  
+  querySnapshot.forEach(doc => {
+    weeklyData[doc.id] = doc.data();
+  });
+  
+  renderWeeklyChart(weekDates, weeklyData);
+}
+
+function renderWeeklyChart(labels, data) {
+  const ctx = document.getElementById("weeklyChart").getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Breakfast', data: labels.map(d => data[d]?.breakfast?.count || 0), backgroundColor: '#4285F4' },
+        { label: 'Lunch', data: labels.map(d => data[d]?.lunch?.count || 0), backgroundColor: '#34A853' },
+        { label: 'Dinner', data: labels.map(d => data[d]?.dinner?.count || 0), backgroundColor: '#EA4335' }
+      ]
+    },
+    options: { responsive: true }
+  });
+}
+
+// Student Daily Data
+async function loadStudentDailyData() {
+  const selectedDate = datePicker.value;
+  const container = document.getElementById("students-daily-data");
+  container.innerHTML = "<div class='loading'>Loading data...</div>";
+  
+  try {
+    const [usersSnapshot, mealDoc] = await Promise.all([
+      getDocs(collection(db, "users")),
+      getDoc(doc(db, "daily_meals", selectedDate))
+    ]);
+    
+    const users = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const mealData = mealDoc.exists() ? mealDoc.data() : null;
+    
+    if (!mealData) {
+      container.innerHTML = "<div class='no-data'>No data available for this date</div>";
+      return;
+    }
+    
+    renderStudentData(users, mealData, container);
+  } catch (error) {
+    console.error("Error loading data:", error);
+    container.innerHTML = `<div class='error'>Error loading data</div>`;
+  }
+}
+
+function renderStudentData(users, mealData, container) {
+  let html = `
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Student Name</th>
+          <th>Breakfast</th>
+          <th>Lunch</th>
+          <th>Dinner</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  
+  users.forEach(user => {
+    html += `
+      <tr>
+        <td>${user.name || user.email}</td>
+        <td class="${mealData.breakfast?.students?.some(s => s.userId === user.id) ? 'present' : 'absent'}">
+          ${mealData.breakfast?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}
+        </td>
+        <td class="${mealData.lunch?.students?.some(s => s.userId === user.id) ? 'present' : 'absent'}">
+          ${mealData.lunch?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}
+        </td>
+        <td class="${mealData.dinner?.students?.some(s => s.userId === user.id) ? 'present' : 'absent'}">
+          ${mealData.dinner?.students?.some(s => s.userId === user.id) ? '✓' : '✗'}
+        </td>
+      </tr>
+    `;
+  });
+  
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
+
 // Helper Functions
+function getWeekDates(date) {
+  const day = date.getDay();
+  const startDate = new Date(date);
+  startDate.setDate(date.getDate() - day);
+  
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    return d.toISOString().split('T')[0];
+  });
+}
+
 function canChangeSelection() {
   const now = new Date();
   const cutoff = new Date();
